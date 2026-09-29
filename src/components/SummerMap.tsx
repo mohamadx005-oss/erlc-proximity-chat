@@ -62,11 +62,11 @@ export function SummerMap({ markers, focus }: { markers: MapMarker[]; focus?: { 
   // pick tile level so tiles render near native resolution
   let level = 0;
   for (let z = 0; z <= SUMMER_MAP.maxLevel; z++) {
-    const cover = SUMMER_MAP.mapPx / SUMMER_MAP.grid[z];
+    const cover = SUMMER_MAP.mapPx / (SUMMER_MAP.grid[z] ?? 1);
     level = z;
     if (cover * view.scale <= SUMMER_MAP.tileSize * 1.2) break;
   }
-  const grid = SUMMER_MAP.grid[level];
+  const grid: number = SUMMER_MAP.grid[level] ?? 1;
   const cover = SUMMER_MAP.mapPx / grid;
   const left = view.cx - size.w / 2 / view.scale;
   const top = view.cy - size.h / 2 / view.scale;
