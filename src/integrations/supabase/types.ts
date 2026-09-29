@@ -14,7 +14,84 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      player_positions: {
+        Row: {
+          in_vehicle: boolean
+          roblox_id: number | null
+          roblox_username: string
+          roblox_username_lower: string
+          team: string | null
+          updated_at: string
+          x: number
+          y: number
+          z: number
+        }
+        Insert: {
+          in_vehicle?: boolean
+          roblox_id?: number | null
+          roblox_username: string
+          roblox_username_lower: string
+          team?: string | null
+          updated_at?: string
+          x: number
+          y: number
+          z: number
+        }
+        Update: {
+          in_vehicle?: boolean
+          roblox_id?: number | null
+          roblox_username?: string
+          roblox_username_lower?: string
+          team?: string | null
+          updated_at?: string
+          x?: number
+          y?: number
+          z?: number
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          discord_avatar_url: string | null
+          discord_id: string | null
+          discord_username: string | null
+          id: string
+          roblox_avatar_url: string | null
+          roblox_id: number | null
+          roblox_username: string | null
+          roblox_verified_at: string | null
+          roblox_verify_code: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          discord_avatar_url?: string | null
+          discord_id?: string | null
+          discord_username?: string | null
+          id: string
+          roblox_avatar_url?: string | null
+          roblox_id?: number | null
+          roblox_username?: string | null
+          roblox_verified_at?: string | null
+          roblox_verify_code?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          discord_avatar_url?: string | null
+          discord_id?: string | null
+          discord_username?: string | null
+          id?: string
+          roblox_avatar_url?: string | null
+          roblox_id?: number | null
+          roblox_username?: string | null
+          roblox_verified_at?: string | null
+          roblox_verify_code?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
