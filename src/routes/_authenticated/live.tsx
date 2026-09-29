@@ -1,24 +1,23 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { Mic, MicOff } from "lucide-react";
+import { useEffect, useState } from "react";
+import { LogOut, Mic, MicOff, Radio, Users } from "lucide-react";
 
-import { SummerMap, type MapMarker } from "@/components/SummerMap";
 import { Button } from "@/components/ui/button";
 import { useProximityVoice, type PeerVolume } from "@/hooks/useProximityVoice";
 import { supabase } from "@/integrations/supabase/client";
 import { getMyProfile } from "@/lib/roblox.functions";
 import { getLivePlayers } from "@/lib/positions.functions";
-import { distanceMeters, type WorldPosition } from "@/lib/proximity";
+import { distanceMeters, MAX_RADIUS_M, type WorldPosition } from "@/lib/proximity";
 
 export const Route = createFileRoute("/_authenticated/live")({
   head: () => ({
     meta: [
-      { title: "الخريطة المباشرة — صوت المقاطعة" },
-      { name: "description", content: "مكانك واللاعبين حولك مباشرة، والصوت حسب المسافة." },
-      { property: "og:title", content: "الخريطة المباشرة — صوت المقاطعة" },
-      { property: "og:description", content: "مكانك واللاعبين حولك مباشرة، والصوت حسب المسافة." },
+      { title: "الغرفة المباشرة — صوت المقاطعة" },
+      { name: "description", content: "شوف مين قريب منك في اللعبة واسمعه حسب المسافة." },
+      { property: "og:title", content: "الغرفة المباشرة — صوت المقاطعة" },
+      { property: "og:description", content: "شوف مين قريب منك في اللعبة واسمعه حسب المسافة." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -54,24 +53,14 @@ function LivePage() {
 
   const volumeOf = (uid: string | null) => volumes.find((v) => v.userId === uid)?.volume ?? 0;
 
-  const markers: MapMarker[] = useMemo(
-    () =>
-      players.map((p) => ({
-        id: p.username,
-        x: p.x,
-        z: p.z,
-        label: p.username,
-        kind: p.username.toLowerCase() === meName ? "me" : p.userId ? "linked" : "other",
-        volume: volumeOf(p.userId),
-      })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [players, volumes, meName],
-  );
-
-  const nearby = players
-    .filter((p) => p.userId && p.userId !== user.id && mePos)
-    .map((p) => ({ ...p, meters: distanceMeters(mePos!, { x: p.x, y: 0, z: p.z }), vol: volumeOf(p.userId) }))
-    .sort((a, b) => a.meters - b.meters);
+  // Only people within hearing range appear; they vanish once they walk away.
+  const nearby = mePos
+    ? players
+        .filter((p) => p.username.toLowerCase() !== meName)
+        .map((p) => ({ ...p, meters: distanceMeters(mePos, { x: p.x, y: 0, z: p.z }), vol: volumeOf(p.userId) }))
+        .filter((p) => p.meters <= MAX_RADIUS_M)
+        .sort((a, b) => a.meters - b.meters)
+    : [];
 
   if (isLoading) return <div className="p-10 text-center text-muted-foreground">جاري التحميل…</div>;
 
@@ -79,63 +68,75 @@ function LivePage() {
     return (
       <main className="mx-auto max-w-md px-6 py-20 text-center">
         <h1 className="text-2xl font-bold">باقي خطوة</h1>
-        <p className="mt-2 text-muted-foreground">اربط حساب روبلكس عشان نعرف مكانك.</p>
+        <p className="mt-2 text-muted-foreground">اربط حساب روبلكس عشان نعرف مين أنت في السيرفر.</p>
         <Button asChild className="mt-6"><Link to="/link">اربط روبلكس</Link></Button>
       </main>
     );
   }
 
   return (
-    <main className="flex h-screen flex-col gap-3 bg-background p-3 md:flex-row">
-      <aside className="flex w-full shrink-0 flex-col gap-3 md:w-80">
-        <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4">
-          {profile.discord_avatar_url && <img src={profile.discord_avatar_url} alt="" className="h-12 w-12 rounded-full" />}
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-8">
+        <header className="flex items-center gap-3 rounded-3xl border border-border bg-card p-4 shadow-[var(--shadow-panel)]">
+          <div className="relative">
+            {profile.discord_avatar_url && <img src={profile.discord_avatar_url} alt="" className="h-14 w-14 rounded-full" />}
+            <span className={`absolute bottom-0 left-0 h-4 w-4 rounded-full border-2 border-card ${me ? "bg-primary" : "bg-muted-foreground"}`} />
+          </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate font-bold">{profile.discord_username}</div>
+            <div className="truncate text-lg font-bold">{profile.discord_username}</div>
             <div dir="ltr" className="truncate text-right text-sm text-muted-foreground">@{profile.roblox_username}</div>
           </div>
-          <button className="text-xs text-muted-foreground underline" onClick={() => supabase.auth.signOut().then(() => (window.location.href = "/"))}>خروج</button>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <Button
-            size="lg"
-            variant={voice.micOn ? "default" : "outline"}
-            className={`w-full ${voice.speaking ? "shadow-[var(--shadow-glow)]" : ""}`}
-            onClick={voice.micOn ? voice.stopMic : voice.startMic}
-          >
-            {voice.micOn ? <Mic /> : <MicOff />}
-            {voice.micOn ? "المايك شغال" : "شغّل المايك"}
+          <Button variant="ghost" size="icon" aria-label="خروج" onClick={() => supabase.auth.signOut().then(() => (window.location.href = "/"))}>
+            <LogOut />
           </Button>
-          {voice.error && <p className="mt-2 text-sm text-destructive">{voice.error}</p>}
-          <p className="mt-3 text-sm text-muted-foreground">
-            {me ? "أنت ظاهر في الخريطة." : "ما لقيناك في السيرفر — ادخل اللعبة وانتظر ثواني."}
-          </p>
-          {data?.error && <p className="mt-2 text-sm text-destructive">{data.error}</p>}
-        </div>
+        </header>
 
-        <div className="flex-1 overflow-auto rounded-2xl border border-border bg-card p-4">
-          <h2 className="mb-3 font-bold">القريبين منك</h2>
-          {nearby.length === 0 && <p className="text-sm text-muted-foreground">ما في أحد مربوط قريب منك.</p>}
-          <ul className="space-y-2">
+        <div className={`flex items-center gap-2 rounded-2xl px-4 py-3 text-sm ${me ? "bg-primary/10 text-primary" : "bg-secondary text-secondary-foreground"}`}>
+          <Radio className="h-4 w-4 shrink-0" />
+          {me ? `متصل — أنت داخل السيرفر${me.team ? ` (${me.team})` : ""}` : "ما لقيناك في السيرفر — ادخل اللعبة وانتظر ثواني."}
+        </div>
+        {data?.error && <p className="rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{data.error}</p>}
+
+        <Button
+          size="lg"
+          variant={voice.micOn ? "default" : "outline"}
+          className={`h-16 rounded-2xl text-lg ${voice.speaking ? "shadow-[var(--shadow-glow)]" : ""}`}
+          onClick={voice.micOn ? voice.stopMic : voice.startMic}
+        >
+          {voice.micOn ? <Mic /> : <MicOff />}
+          {voice.micOn ? "المايك شغال" : "شغّل المايك"}
+        </Button>
+        {voice.error && <p className="text-sm text-destructive">{voice.error}</p>}
+
+        <section className="rounded-3xl border border-border bg-card p-5 shadow-[var(--shadow-panel)]">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 font-bold"><Users className="h-5 w-5 text-primary" /> القريبين منك</h2>
+            <span className="rounded-full bg-secondary px-3 py-0.5 text-sm text-secondary-foreground">{nearby.length}</span>
+          </div>
+          {nearby.length === 0 && (
+            <p className="py-8 text-center text-sm text-muted-foreground">ما في أحد قريب منك الحين.</p>
+          )}
+          <ul className="space-y-3">
             {nearby.map((p) => (
-              <li key={p.username} className="flex items-center gap-3">
-                {p.avatar && <img src={p.avatar} alt="" className="h-8 w-8 rounded-full bg-secondary" />}
+              <li key={p.username} className="flex items-center gap-3 rounded-2xl bg-background/60 p-3 animate-in fade-in">
+                {p.avatar ? (
+                  <img src={p.avatar} alt="" className="h-10 w-10 rounded-full bg-secondary" />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary font-bold">{p.username[0]}</div>
+                )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{p.username}</div>
-                  <div className="h-1.5 rounded-full bg-secondary">
-                    <div className="h-1.5 rounded-full bg-primary transition-all" style={{ width: `${Math.round(p.vol * 100)}%` }} />
+                  <div dir="ltr" className="truncate text-right font-semibold">{p.username}</div>
+                  <div className="mt-1 h-1.5 rounded-full bg-secondary">
+                    <div className="h-1.5 rounded-full bg-primary transition-all" style={{ width: `${Math.round((p.userId ? p.vol : 0) * 100)}%` }} />
                   </div>
+                  {!p.userId && <div className="mt-1 text-xs text-muted-foreground">مو مسجّل في الموقع</div>}
                 </div>
-                <span className="text-xs text-muted-foreground">{Math.round(p.meters)} م</span>
+                <span className="text-sm tabular-nums text-muted-foreground">{Math.round(p.meters)} م</span>
               </li>
             ))}
           </ul>
-        </div>
-      </aside>
-      <section className="min-h-[50vh] flex-1">
-        <SummerMap markers={markers} focus={me ? { x: me.x, z: me.z } : null} />
-      </section>
+        </section>
+      </div>
     </main>
   );
 }

@@ -17,9 +17,9 @@ export const Route = createFileRoute("/_authenticated/link")({
   head: () => ({
     meta: [
       { title: "ربط حساب روبلكس — صوت المقاطعة" },
-      { name: "description", content: "اربط حساب روبلكس عشان نعرف مكانك في الخريطة." },
+      { name: "description", content: "اربط حساب روبلكس عشان نعرف مين أنت في السيرفر." },
       { property: "og:title", content: "ربط حساب روبلكس — صوت المقاطعة" },
-      { property: "og:description", content: "اربط حساب روبلكس عشان نعرف مكانك في الخريطة." },
+      { property: "og:description", content: "اربط حساب روبلكس عشان نعرف مين أنت في السيرفر." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -57,7 +57,7 @@ function LinkPage() {
       <main className="mx-auto max-w-md px-6 py-20 text-center">
         {profile.roblox_avatar_url && <img src={profile.roblox_avatar_url} alt="" className="mx-auto h-24 w-24 rounded-full bg-secondary" />}
         <h1 className="mt-4 text-2xl font-bold">مربوط بـ {profile.roblox_username}</h1>
-        <Button asChild className="mt-6"><Link to="/live">افتح الخريطة</Link></Button>
+        <Button asChild className="mt-6"><Link to="/live">ادخل الغرفة</Link></Button>
       </main>
     );
   }

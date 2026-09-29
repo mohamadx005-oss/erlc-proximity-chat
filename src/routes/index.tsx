@@ -9,7 +9,7 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "صوت المقاطعة — محادثة صوتية بالقرب في ERLC" },
-      { name: "description", content: "سجّل بديسكورد، اربط روبلكس، واسمع اللاعبين القريبين منك في خريطة ERLC الصيفية." },
+      { name: "description", content: "سجّل بديسكورد، اربط روبلكس، واسمع اللاعبين القريبين منك منك في ERLC." },
       { property: "og:title", content: "صوت المقاطعة — محادثة صوتية بالقرب في ERLC" },
       { property: "og:description", content: "كل ما قربت من لاعب تسمعه أوضح، وكل ما بعدت يخفت صوته." },
       { property: "og:type", content: "website" },
@@ -38,7 +38,7 @@ function Index() {
     <main className="min-h-screen bg-background text-foreground">
       <section className="mx-auto flex max-w-5xl flex-col items-center px-6 pb-16 pt-24 text-center">
         <span className="rounded-full bg-secondary px-4 py-1 text-sm font-semibold text-secondary-foreground">
-          خريطة الصيف · ERLC
+          ERLC · صوت بالقرب
         </span>
         <h1 className="mt-6 font-display text-5xl font-bold leading-tight md:text-6xl">
           اسمع اللي <span className="text-primary">جنبك</span> بس
@@ -50,7 +50,7 @@ function Index() {
         <div className="mt-8">
           {signedIn ? (
             <Button asChild size="lg" className="shadow-[var(--shadow-glow)]">
-              <Link to="/live">افتح الخريطة</Link>
+              <Link to="/live">ادخل الغرفة</Link>
             </Button>
           ) : (
             <Button asChild size="lg" className="shadow-[var(--shadow-glow)]">
@@ -58,13 +58,12 @@ function Index() {
             </Button>
           )}
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">نطلب اسمك وصورتك فقط — بدون إيميل.</p>
       </section>
 
       <section className="mx-auto grid max-w-5xl gap-4 px-6 pb-24 md:grid-cols-3">
         {[
-          { icon: Radio, t: "سجّل بديسكورد", d: "دخول سريع باسمك وصورتك." },
-          { icon: MapPin, t: "اربط روبلكس", d: "عشان نعرف وين أنت في المقاطعة." },
+          { icon: Radio, t: "سجّل بديسكورد", d: "دخول سريع بضغطة وحدة." },
+          { icon: MapPin, t: "اربط روبلكس", d: "عشان نعرف مين أنت داخل السيرفر." },
           { icon: Headphones, t: "تكلّم", d: "الصوت يتغير حسب المسافة بينكم." },
         ].map(({ icon: Icon, t, d }) => (
           <div key={t} className="rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-[var(--shadow-panel)]">
