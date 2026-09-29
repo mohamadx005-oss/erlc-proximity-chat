@@ -75,6 +75,7 @@ export function useProximityVoice(userId: string | null) {
 
       connection.ontrack = (event) => {
         const remote = event.streams[0];
+        if (!remote) return;
         audio.srcObject = remote;
         void audio.play().catch(() => undefined);
         const source = ctx.createMediaStreamSource(remote);
