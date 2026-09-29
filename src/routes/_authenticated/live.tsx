@@ -52,6 +52,7 @@ function LivePage() {
   }, [data, voice.connectedPeers]);
 
   const volumeOf = (uid: string | null) => volumes.find((v) => v.userId === uid)?.volume ?? 0;
+  const voiceConnected = (uid: string | null) => !!uid && voice.connectedPeers.includes(uid);
 
   // Only people within hearing range appear; they vanish once they walk away.
   const nearby = mePos
@@ -129,7 +130,13 @@ function LivePage() {
                   <div className="mt-1 h-1.5 rounded-full bg-secondary">
                     <div className="h-1.5 rounded-full bg-primary transition-all" style={{ width: `${Math.round((p.userId ? p.vol : 0) * 100)}%` }} />
                   </div>
-                  {!p.userId && <div className="mt-1 text-xs text-muted-foreground">مو مسجّل في الموقع</div>}
+                  {!p.userId ? (
+                    <div className="mt-1 text-xs text-muted-foreground">مو مسجّل في الموقع</div>
+                  ) : voiceConnected(p.userId) ? (
+                    <div className="mt-1 text-xs text-primary">متصل بالصوت</div>
+                  ) : (
+                    <div className="mt-1 text-xs text-muted-foreground">داخل اللعبة — بانتظار تشغيل المايك</div>
+                  )}
                 </div>
                 <span className="text-sm tabular-nums text-muted-foreground">{Math.round(p.meters)} م</span>
               </li>
