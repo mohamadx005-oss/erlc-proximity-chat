@@ -58,7 +58,10 @@ export async function verifyState(state: string | null): Promise<Record<string, 
 }
 
 export function appOrigin(request: Request): string {
-  return new URL(request.url).origin;
+  const u = new URL(request.url);
+  const host = request.headers.get("x-forwarded-host")?.split(",")[0].trim() || u.host;
+  const isLocal = host.startsWith("localhost") || host.startsWith("127.");
+  return `${isLocal ? u.protocol.replace(":", "") : "https"}://${host}`;
 }
 
 export function errorRedirect(request: Request, message: string): Response {
