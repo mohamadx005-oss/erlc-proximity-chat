@@ -1,49 +1,47 @@
 /**
- * Coordinate + proximity-audio math for the ERLC (summer) map.
+ * Coordinate + proximity-audio math for the ERLC SUMMER map (erlc-tools.com).
  *
- * The game reports world positions in Roblox studs. 1 stud ~= 0.28 meters.
- * Everything the UI shows the player is in meters.
+ * The ER:LC server API reports Location.LocationX / LocationZ in in-game map
+ * units (2 studs each). We convert them to world studs, then to summer map px.
  */
 
 export const STUDS_PER_METER = 1 / 0.28;
 
 /** Fully audible inside this radius. */
-export const CLEAR_RADIUS_M = 50;
+export const CLEAR_RADIUS_M = 15;
 /** Volume fades to silence at this radius. */
-export const MAX_RADIUS_M = 150;
+export const MAX_RADIUS_M = 60;
 
-/**
- * World bounds of the ERLC summer map in studs.
- * X grows to the east, Z grows to the south.
- * Tune these if marker placement drifts from the real map.
- */
-export const MAP_BOUNDS = {
-  minX: -1900,
-  maxX: 1900,
-  minZ: -1900,
-  maxZ: 1900,
+/** Summer map tile pyramid (erlc-tools.com/map-tiles/summer/meta.json). */
+export const SUMMER_MAP = {
+  mapPx: 29700,
+  tileSize: 990,
+  maxLevel: 5,
+  grid: [1, 2, 4, 8, 15, 30] as const,
+  originX: -6112,
+  originZ: -5472,
+  pxPerStud: 2.75,
+  tileUrl: (z: number, x: number, y: number) =>
+    `https://erlc-tools.com/map-tiles/summer/z${z}/${x}_${y}.webp`,
 } as const;
-
-/** Grid letters/numbers drawn over the map, like the in-game map grid. */
-export const GRID_COLUMNS = ["A", "B", "C", "D", "E", "F", "G", "H"] as const;
-export const GRID_ROWS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 export type WorldPosition = { x: number; y: number; z: number };
 
-/** Convert a world position to 0..1 coordinates on the map image. */
-export function worldToMap(pos: WorldPosition): { u: number; v: number } {
-  const { minX, maxX, minZ, maxZ } = MAP_BOUNDS;
-  const u = (pos.x - minX) / (maxX - minX);
-  const v = (pos.z - minZ) / (maxZ - minZ);
-  return { u: clamp01(u), v: clamp01(v) };
+/** ER:LC API Location -> world studs (summer expansion). */
+export function apiLocationToWorld(locationX: number, locationZ: number): WorldPosition {
+  return {
+    x: 4641.842 - 2 * locationZ,
+    y: 0,
+    z: -5426.232 + 2 * locationX,
+  };
 }
 
-/** Grid cell label, e.g. "D5". */
-export function gridLabel(pos: WorldPosition): string {
-  const { u, v } = worldToMap(pos);
-  const col = GRID_COLUMNS[Math.min(GRID_COLUMNS.length - 1, Math.floor(u * GRID_COLUMNS.length))];
-  const row = GRID_ROWS[Math.min(GRID_ROWS.length - 1, Math.floor(v * GRID_ROWS.length))];
-  return `${col}${row}`;
+/** World studs -> summer map pixels (map turned a quarter turn CCW). */
+export function worldToMapPx(pos: { x: number; z: number }): { px: number; py: number } {
+  return {
+    px: (pos.z - SUMMER_MAP.originZ) * SUMMER_MAP.pxPerStud,
+    py: SUMMER_MAP.mapPx - (pos.x - SUMMER_MAP.originX) * SUMMER_MAP.pxPerStud,
+  };
 }
 
 /** Straight-line distance in meters between two world positions. */
@@ -51,14 +49,10 @@ export function distanceMeters(a: WorldPosition, b: WorldPosition): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   const dz = a.z - b.z;
-  const studs = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  return studs / STUDS_PER_METER;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz) / STUDS_PER_METER;
 }
 
-/**
- * Volume for a voice stream at a given distance.
- * 1 inside the clear radius, then an ease-out curve down to 0.
- */
+/** 1 inside the clear radius, then an ease-out curve down to 0. */
 export function volumeForDistance(meters: number): number {
   if (meters <= CLEAR_RADIUS_M) return 1;
   if (meters >= MAX_RADIUS_M) return 0;
@@ -66,14 +60,13 @@ export function volumeForDistance(meters: number): number {
   return clamp01(Math.pow(1 - t, 1.8));
 }
 
-/**
- * Stereo pan (-1 left .. 1 right) of `other` relative to `me`.
- * Uses raw world axes, since the game does not report camera yaw.
- */
+/** Stereo pan (-1 left .. 1 right) using screen/map east-west. */
 export function panForPositions(me: WorldPosition, other: WorldPosition): number {
-  const dx = other.x - me.x;
-  const dz = other.z - me.z;
-  const dist = Math.sqrt(dx * dx + dz * dz);
+  const a = worldToMapPx(me);
+  const b = worldToMapPx(other);
+  const dx = b.px - a.px;
+  const dy = b.py - a.py;
+  const dist = Math.sqrt(dx * dx + dy * dy);
   if (dist < 1) return 0;
   return Math.max(-1, Math.min(1, dx / dist));
 }
@@ -82,7 +75,6 @@ function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
-/** Freshness window: positions older than this are treated as offline. */
 export const POSITION_STALE_MS = 30_000;
 
 export function isFresh(updatedAt: string | Date): boolean {
