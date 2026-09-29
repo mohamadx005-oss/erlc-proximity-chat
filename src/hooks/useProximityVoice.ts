@@ -11,6 +11,7 @@ type PeerState = {
   audio: HTMLAudioElement;
   makingOffer: boolean;
   polite: boolean;
+  pendingCandidates: RTCIceCandidateInit[];
 };
 
 export type PeerVolume = { userId: string; volume: number };
@@ -62,7 +63,15 @@ export function useProximityVoice(userId: string | null) {
       audio.autoplay = true;
       audio.muted = true; // routed through WebAudio instead
 
-      const state: PeerState = { connection, gain, panner, audio, makingOffer: false, polite };
+      const state: PeerState = {
+        connection,
+        gain,
+        panner,
+        audio,
+        makingOffer: false,
+        polite,
+        pendingCandidates: [],
+      };
 
       const stream = streamRef.current;
       if (stream) for (const track of stream.getTracks()) connection.addTrack(track, stream);
@@ -216,6 +225,9 @@ export function useProximityVoice(userId: string | null) {
       if (offerCollision && !peer.polite) return;
       try {
         await peer.connection.setRemoteDescription(description);
+        for (const candidate of peer.pendingCandidates.splice(0)) {
+          await peer.connection.addIceCandidate(candidate);
+        }
         if (description.type === "offer") {
           await peer.connection.setLocalDescription();
           channel.send({
@@ -234,10 +246,15 @@ export function useProximityVoice(userId: string | null) {
       if (!from || payload?.["to"] !== userId) return;
       const peer = peersRef.current.get(from);
       if (!peer) return;
+      const candidate = payload?.["candidate"] as RTCIceCandidateInit;
+      if (!peer.connection.remoteDescription) {
+        peer.pendingCandidates.push(candidate);
+        return;
+      }
       try {
-        await peer.connection.addIceCandidate(payload?.["candidate"] as RTCIceCandidateInit);
-      } catch {
-        /* candidate arrived too early; safe to ignore */
+        await peer.connection.addIceCandidate(candidate);
+      } catch (err) {
+        console.error("ICE candidate failed", err);
       }
     });
 

@@ -22,6 +22,35 @@ type ErlcPlayer = {
 };
 
 const MIN_POLL_MS = 2500;
+const CLAIM_MS = 10_000;
+const SYNC_ROW = "__erlc_sync__";
+
+type SyncState = {
+  roblox_username: string;
+  team: string | null;
+  updated_at: string;
+};
+
+function retryDelayMs(response: Response, body: string): number {
+  const retryAfterHeader = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0) {
+    return Math.ceil(retryAfterHeader * 1000);
+  }
+  try {
+    const parsed = JSON.parse(body) as { retry_after?: number };
+    if (Number.isFinite(parsed.retry_after) && Number(parsed.retry_after) > 0) {
+      return Math.ceil(Number(parsed.retry_after) * 1000);
+    }
+  } catch {
+    // ER:LC occasionally returns a plain-text error.
+  }
+  return 60_000;
+}
+
+function waitMessage(until: string): string {
+  const minutes = Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 60_000));
+  return `تحديث ER:LC متوقف مؤقتًا، بيرجع تلقائيًا خلال ${minutes} دقيقة`;
+}
 
 /** Pulls live positions from the ER:LC server API (throttled, shared by all users). */
 async function refreshFromErlc(): Promise<string | null> {
@@ -30,13 +59,45 @@ async function refreshFromErlc(): Promise<string | null> {
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-  const { data: latest } = await supabaseAdmin
+  const { data: sync } = await supabaseAdmin
     .from("player_positions")
-    .select("updated_at")
-    .order("updated_at", { ascending: false })
-    .limit(1)
+    .select("roblox_username, team, updated_at")
+    .eq("roblox_username_lower", SYNC_ROW)
     .maybeSingle();
-  if (latest && Date.now() - Date.parse(latest.updated_at) < MIN_POLL_MS) return null;
+
+  const currentSync = sync as SyncState | null;
+  if (currentSync) {
+    const nextAttempt = Date.parse(currentSync.updated_at);
+    if (nextAttempt > Date.now()) return waitMessage(currentSync.updated_at);
+    if (Date.now() - nextAttempt < MIN_POLL_MS) return null;
+  }
+
+  // Every visitor polls this function. A shared row elects exactly one request
+  // to contact ER:LC, preventing a multi-user burst from exhausting its limit.
+  const claim = crypto.randomUUID();
+  const claimedUntil = new Date(Date.now() + CLAIM_MS).toISOString();
+  const { error: claimError } = await supabaseAdmin.from("player_positions").upsert(
+    {
+      roblox_username_lower: SYNC_ROW,
+      roblox_username: SYNC_ROW,
+      roblox_id: null,
+      x: 0,
+      y: 0,
+      z: 0,
+      team: claim,
+      in_vehicle: false,
+      updated_at: claimedUntil,
+    },
+    { onConflict: "roblox_username_lower" },
+  );
+  if (claimError) throw new Error(claimError.message);
+
+  const { data: winner } = await supabaseAdmin
+    .from("player_positions")
+    .select("team")
+    .eq("roblox_username_lower", SYNC_ROW)
+    .maybeSingle();
+  if (winner?.team !== claim) return null;
 
   const res = await fetch("https://api.erlc.gg/v2/server?Players=true", {
     headers: { "server-key": apiKey, accept: "application/json" },
@@ -44,7 +105,19 @@ async function refreshFromErlc(): Promise<string | null> {
   if (!res.ok) {
     const text = await res.text();
     console.error("ERLC API failed", res.status, text);
-    return res.status === 429 ? null : `ERLC API ${res.status}`;
+    if (res.status === 429) {
+      const blockedUntil = new Date(Date.now() + retryDelayMs(res, text)).toISOString();
+      await supabaseAdmin
+        .from("player_positions")
+        .update({ updated_at: blockedUntil, team: "rate-limited" })
+        .eq("roblox_username_lower", SYNC_ROW);
+      return waitMessage(blockedUntil);
+    }
+    await supabaseAdmin
+      .from("player_positions")
+      .update({ updated_at: new Date(Date.now() + 60_000).toISOString(), team: "error" })
+      .eq("roblox_username_lower", SYNC_ROW);
+    return `تعذّر تحديث ER:LC (${res.status}) — بنحاول تلقائيًا`;
   }
   const json = (await res.json()) as { Players?: ErlcPlayer[] };
   const now = new Date().toISOString();
@@ -77,7 +150,15 @@ async function refreshFromErlc(): Promise<string | null> {
     if (error) console.error("position upsert failed", error);
   }
   // Players who left the server disappear.
-  await supabaseAdmin.from("player_positions").delete().lt("updated_at", now);
+  await supabaseAdmin
+    .from("player_positions")
+    .delete()
+    .neq("roblox_username_lower", SYNC_ROW)
+    .lt("updated_at", now);
+  await supabaseAdmin
+    .from("player_positions")
+    .update({ updated_at: now, team: "ok" })
+    .eq("roblox_username_lower", SYNC_ROW);
   return null;
 }
 
@@ -95,7 +176,8 @@ export const getLivePlayers = createServerFn({ method: "GET" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: positions } = await supabaseAdmin
       .from("player_positions")
-      .select("roblox_username, roblox_username_lower, roblox_id, x, z, team, updated_at");
+      .select("roblox_username, roblox_username_lower, roblox_id, x, z, team, updated_at")
+      .neq("roblox_username_lower", SYNC_ROW);
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, roblox_username, roblox_avatar_url")
