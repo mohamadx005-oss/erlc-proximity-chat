@@ -10,7 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiPublicPositionsRouteImport } from './routes/api/public/positions'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedLinkRouteImport } from './routes/_authenticated/link'
+import { Route as AuthenticatedLiveRouteImport } from './routes/_authenticated/live'
 import { Route as ApiPublicAuthDiscordCallbackRouteImport } from './routes/api/public/auth/discord/callback'
 import { Route as ApiPublicAuthDiscordStartRouteImport } from './routes/api/public/auth/discord/start'
 import { Route as ApiPublicAuthRobloxCallbackRouteImport } from './routes/api/public/auth/roblox/callback'
@@ -20,10 +23,24 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiPublicPositionsRoute = ApiPublicPositionsRouteImport.update({
-  id: '/api/public/positions',
-  path: '/api/public/positions',
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedLinkRoute = AuthenticatedLinkRouteImport.update({
+  id: '/link',
+  path: '/link',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedLiveRoute = AuthenticatedLiveRouteImport.update({
+  id: '/live',
+  path: '/live',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const ApiPublicAuthDiscordCallbackRoute =
   ApiPublicAuthDiscordCallbackRouteImport.update({
@@ -46,14 +63,18 @@ const ApiPublicAuthRobloxCallbackRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/api/public/positions': typeof ApiPublicPositionsRoute
+  '/auth': typeof AuthRoute
+  '/link': typeof AuthenticatedLinkRoute
+  '/live': typeof AuthenticatedLiveRoute
   '/api/public/auth/discord/callback': typeof ApiPublicAuthDiscordCallbackRoute
   '/api/public/auth/discord/start': typeof ApiPublicAuthDiscordStartRoute
   '/api/public/auth/roblox/callback': typeof ApiPublicAuthRobloxCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/api/public/positions': typeof ApiPublicPositionsRoute
+  '/auth': typeof AuthRoute
+  '/link': typeof AuthenticatedLinkRoute
+  '/live': typeof AuthenticatedLiveRoute
   '/api/public/auth/discord/callback': typeof ApiPublicAuthDiscordCallbackRoute
   '/api/public/auth/discord/start': typeof ApiPublicAuthDiscordStartRoute
   '/api/public/auth/roblox/callback': typeof ApiPublicAuthRobloxCallbackRoute
@@ -61,7 +82,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/api/public/positions': typeof ApiPublicPositionsRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/auth': typeof AuthRoute
+  '/_authenticated/link': typeof AuthenticatedLinkRoute
+  '/_authenticated/live': typeof AuthenticatedLiveRoute
   '/api/public/auth/discord/callback': typeof ApiPublicAuthDiscordCallbackRoute
   '/api/public/auth/discord/start': typeof ApiPublicAuthDiscordStartRoute
   '/api/public/auth/roblox/callback': typeof ApiPublicAuthRobloxCallbackRoute
@@ -70,21 +94,28 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/api/public/positions'
+    | '/auth'
+    | '/link'
+    | '/live'
     | '/api/public/auth/discord/callback'
     | '/api/public/auth/discord/start'
     | '/api/public/auth/roblox/callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/api/public/positions'
+    | '/auth'
+    | '/link'
+    | '/live'
     | '/api/public/auth/discord/callback'
     | '/api/public/auth/discord/start'
     | '/api/public/auth/roblox/callback'
   id:
     | '__root__'
     | '/'
-    | '/api/public/positions'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/link'
+    | '/_authenticated/live'
     | '/api/public/auth/discord/callback'
     | '/api/public/auth/discord/start'
     | '/api/public/auth/roblox/callback'
@@ -92,7 +123,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApiPublicPositionsRoute: typeof ApiPublicPositionsRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  AuthRoute: typeof AuthRoute
   ApiPublicAuthDiscordCallbackRoute: typeof ApiPublicAuthDiscordCallbackRoute
   ApiPublicAuthDiscordStartRoute: typeof ApiPublicAuthDiscordStartRoute
   ApiPublicAuthRobloxCallbackRoute: typeof ApiPublicAuthRobloxCallbackRoute
@@ -107,12 +139,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/positions': {
-      id: '/api/public/positions'
-      path: '/api/public/positions'
-      fullPath: '/api/public/positions'
-      preLoaderRoute: typeof ApiPublicPositionsRouteImport
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/link': {
+      id: '/_authenticated/link'
+      path: '/link'
+      fullPath: '/link'
+      preLoaderRoute: typeof AuthenticatedLinkRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/live': {
+      id: '/_authenticated/live'
+      path: '/live'
+      fullPath: '/live'
+      preLoaderRoute: typeof AuthenticatedLiveRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/api/public/auth/discord/callback': {
       id: '/api/public/auth/discord/callback'
@@ -138,9 +191,23 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedLinkRoute: typeof AuthenticatedLinkRoute
+  AuthenticatedLiveRoute: typeof AuthenticatedLiveRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedLinkRoute: AuthenticatedLinkRoute,
+  AuthenticatedLiveRoute: AuthenticatedLiveRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApiPublicPositionsRoute: ApiPublicPositionsRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  AuthRoute: AuthRoute,
   ApiPublicAuthDiscordCallbackRoute: ApiPublicAuthDiscordCallbackRoute,
   ApiPublicAuthDiscordStartRoute: ApiPublicAuthDiscordStartRoute,
   ApiPublicAuthRobloxCallbackRoute: ApiPublicAuthRobloxCallbackRoute,
