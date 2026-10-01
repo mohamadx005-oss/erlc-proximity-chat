@@ -195,10 +195,13 @@ export const getLivePlayers = createServerFn({ method: "GET" })
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Only real, recent positions count — stale rows must never look "connected".
+    const freshSince = new Date(Date.now() - 30_000).toISOString();
     const { data: positions } = await supabaseAdmin
       .from("player_positions")
       .select("roblox_username, roblox_username_lower, roblox_id, x, z, team, updated_at")
-      .neq("roblox_username_lower", SYNC_ROW);
+      .neq("roblox_username_lower", SYNC_ROW)
+      .gte("updated_at", freshSince);
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, roblox_username, roblox_avatar_url")
