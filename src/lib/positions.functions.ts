@@ -24,8 +24,6 @@ type ErlcPlayer = {
 const MIN_POLL_MS = 2000;
 const CLAIM_MS = 6_000;
 const SYNC_ROW = "__erlc_sync__";
-/** Never pause tracking longer than this, so players reappear within seconds. */
-const MAX_BACKOFF_MS = 15_000;
 
 type SyncState = {
   roblox_username: string;
@@ -33,41 +31,40 @@ type SyncState = {
   updated_at: string;
 };
 
-/** Converts a seconds / ms / epoch value into a short, capped delay. */
-function normalizeDelay(raw: number): number | null {
+/** Converts a seconds / epoch value into a delay. Never shortened: ER:LC blocks apps that retry early. */
+function toDelayMs(raw: number): number | null {
   if (!Number.isFinite(raw) || raw <= 0) return null;
   let ms: number;
   if (raw > 1e12) ms = raw - Date.now(); // epoch ms
   else if (raw > 1e9) ms = raw * 1000 - Date.now(); // epoch seconds
-  else if (raw > 1000) ms = raw; // already ms
   else ms = raw * 1000; // seconds
-  return Math.min(MAX_BACKOFF_MS, Math.max(1000, Math.ceil(ms)));
+  return Math.max(1000, Math.ceil(ms) + 1000);
 }
 
 function retryDelayMs(response: Response, body: string): number {
-  const fromHeader =
-    normalizeDelay(Number(response.headers.get("retry-after"))) ??
-    normalizeDelay(Number(response.headers.get("x-ratelimit-reset")));
-  if (fromHeader) return fromHeader;
+  const candidates: (number | null)[] = [toDelayMs(Number(response.headers.get("retry-after")))];
   try {
     const parsed = JSON.parse(body) as { retry_after?: number };
-    const d = normalizeDelay(Number(parsed.retry_after));
-    if (d) return d;
+    candidates.push(toDelayMs(Number(parsed.retry_after)));
   } catch {
     // ER:LC occasionally returns a plain-text error.
   }
-  return 5_000;
+  candidates.push(toDelayMs(Number(response.headers.get("x-ratelimit-reset"))));
+  const valid = candidates.filter((n): n is number => n !== null);
+  return valid.length ? Math.max(...valid) : 60_000;
 }
 
 function waitMessage(until: string): string {
   const seconds = Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 1000));
-  return `ER:LC طلب انتظار قصير — يرجع التحديث خلال ${seconds} ثانية`;
+  if (seconds < 90) return `ER:LC طلب انتظار — يرجع التحديث خلال ${seconds} ثانية`;
+  return `ER:LC موقف التتبع مؤقتًا — يرجع تلقائيًا خلال ${Math.ceil(seconds / 60)} دقيقة`;
 }
 
 /** Pulls live positions from the ER:LC server API (throttled, shared by all users). */
 async function refreshFromErlc(): Promise<string | null> {
   const apiKey = process.env["ERLC_API_KEY"];
   if (!apiKey) return "ERLC_API_KEY غير مضبوط";
+  const globalKey = process.env["ERLC_GLOBAL_API_KEY"];
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -80,16 +77,26 @@ async function refreshFromErlc(): Promise<string | null> {
   const currentSync = sync as SyncState | null;
   if (currentSync) {
     const nextAttempt = Date.parse(currentSync.updated_at);
-    if (nextAttempt > Date.now()) return waitMessage(currentSync.updated_at);
+    if (nextAttempt > Date.now()) {
+      return currentSync.team === "rate-limited" ? waitMessage(currentSync.updated_at) : null;
+    }
     if (Date.now() - nextAttempt < MIN_POLL_MS) return null;
   }
 
-  // Every visitor polls this function. A shared row elects exactly one request
-  // to contact ER:LC, preventing a multi-user burst from exhausting its limit.
+  // Every visitor polls this function. An atomic conditional update elects
+  // exactly one request to contact ER:LC, and can never overwrite a block.
   const claim = crypto.randomUUID();
   const claimedUntil = new Date(Date.now() + CLAIM_MS).toISOString();
-  const { error: claimError } = await supabaseAdmin.from("player_positions").upsert(
-    {
+  if (currentSync) {
+    const { data: won } = await supabaseAdmin
+      .from("player_positions")
+      .update({ team: claim, updated_at: claimedUntil })
+      .eq("roblox_username_lower", SYNC_ROW)
+      .eq("updated_at", currentSync.updated_at)
+      .select("team");
+    if (!won?.length) return null;
+  } else {
+    const { error: insertError } = await supabaseAdmin.from("player_positions").insert({
       roblox_username_lower: SYNC_ROW,
       roblox_username: SYNC_ROW,
       roblox_id: null,
@@ -99,21 +106,13 @@ async function refreshFromErlc(): Promise<string | null> {
       team: claim,
       in_vehicle: false,
       updated_at: claimedUntil,
-    },
-    { onConflict: "roblox_username_lower" },
-  );
-  if (claimError) throw new Error(claimError.message);
+    });
+    if (insertError) return null;
+  }
 
-  const { data: winner } = await supabaseAdmin
-    .from("player_positions")
-    .select("team")
-    .eq("roblox_username_lower", SYNC_ROW)
-    .maybeSingle();
-  if (winner?.team !== claim) return null;
-
-  const res = await fetch("https://api.erlc.gg/v2/server?Players=true", {
-    headers: { "server-key": apiKey, accept: "application/json" },
-  });
+  const headers: Record<string, string> = { "server-key": apiKey, accept: "application/json" };
+  if (globalKey) headers["authorization"] = globalKey;
+  const res = await fetch("https://api.erlc.gg/v2/server?Players=true", { headers });
   if (!res.ok) {
     const text = await res.text();
     console.error("ERLC API failed", res.status, text);
@@ -132,10 +131,11 @@ async function refreshFromErlc(): Promise<string | null> {
     return `تعذّر تحديث ER:LC (${res.status}) — بنحاول تلقائيًا`;
   }
   // Pace proactively when the bucket is nearly empty instead of hitting 429.
-  const remaining = Number(res.headers.get("x-ratelimit-remaining"));
+  const remainingHeader = res.headers.get("x-ratelimit-remaining");
+  const remaining = remainingHeader === null ? NaN : Number(remainingHeader);
   const pauseUntil =
-    Number.isFinite(remaining) && remaining <= 1
-      ? normalizeDelay(Number(res.headers.get("x-ratelimit-reset")))
+    Number.isFinite(remaining) && remaining <= 2
+      ? toDelayMs(Number(res.headers.get("x-ratelimit-reset")))
       : null;
   const json = (await res.json()) as { Players?: ErlcPlayer[] };
   const now = new Date().toISOString();
@@ -176,7 +176,7 @@ async function refreshFromErlc(): Promise<string | null> {
   await supabaseAdmin
     .from("player_positions")
     .update({
-      updated_at: pauseUntil ? new Date(Date.now() + pauseUntil - MIN_POLL_MS).toISOString() : now,
+      updated_at: pauseUntil ? new Date(Date.now() + pauseUntil).toISOString() : now,
       team: "ok",
     })
     .eq("roblox_username_lower", SYNC_ROW);
@@ -195,10 +195,13 @@ export const getLivePlayers = createServerFn({ method: "GET" })
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Only real, recent positions count — stale rows must never look "connected".
+    const freshSince = new Date(Date.now() - 30_000).toISOString();
     const { data: positions } = await supabaseAdmin
       .from("player_positions")
       .select("roblox_username, roblox_username_lower, roblox_id, x, z, team, updated_at")
-      .neq("roblox_username_lower", SYNC_ROW);
+      .neq("roblox_username_lower", SYNC_ROW)
+      .gte("updated_at", freshSince);
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, roblox_username, roblox_avatar_url")

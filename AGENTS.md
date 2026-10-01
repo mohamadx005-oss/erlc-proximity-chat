@@ -9,4 +9,4 @@
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
 
-- Coordinate ER:LC polling through the reserved `__erlc_sync__` position row and honor upstream backoff, because every signed-in client invokes the same refresh function.
+- Coordinate ER:LC polling through the reserved `__erlc_sync__` position row (atomic conditional claim) and honor the full upstream retry_after without capping, because early retries trigger multi-hour ER:LC invalid-request blocks.
