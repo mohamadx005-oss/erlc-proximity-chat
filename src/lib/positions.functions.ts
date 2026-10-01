@@ -21,9 +21,11 @@ type ErlcPlayer = {
   Location?: { LocationX?: number; LocationZ?: number };
 };
 
-const MIN_POLL_MS = 2500;
-const CLAIM_MS = 10_000;
+const MIN_POLL_MS = 2000;
+const CLAIM_MS = 6_000;
 const SYNC_ROW = "__erlc_sync__";
+/** Never pause tracking longer than this, so players reappear within seconds. */
+const MAX_BACKOFF_MS = 15_000;
 
 type SyncState = {
   roblox_username: string;
@@ -31,25 +33,35 @@ type SyncState = {
   updated_at: string;
 };
 
+/** Converts a seconds / ms / epoch value into a short, capped delay. */
+function normalizeDelay(raw: number): number | null {
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  let ms: number;
+  if (raw > 1e12) ms = raw - Date.now(); // epoch ms
+  else if (raw > 1e9) ms = raw * 1000 - Date.now(); // epoch seconds
+  else if (raw > 1000) ms = raw; // already ms
+  else ms = raw * 1000; // seconds
+  return Math.min(MAX_BACKOFF_MS, Math.max(1000, Math.ceil(ms)));
+}
+
 function retryDelayMs(response: Response, body: string): number {
-  const retryAfterHeader = Number(response.headers.get("retry-after"));
-  if (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0) {
-    return Math.ceil(retryAfterHeader * 1000);
-  }
+  const fromHeader =
+    normalizeDelay(Number(response.headers.get("retry-after"))) ??
+    normalizeDelay(Number(response.headers.get("x-ratelimit-reset")));
+  if (fromHeader) return fromHeader;
   try {
     const parsed = JSON.parse(body) as { retry_after?: number };
-    if (Number.isFinite(parsed.retry_after) && Number(parsed.retry_after) > 0) {
-      return Math.ceil(Number(parsed.retry_after) * 1000);
-    }
+    const d = normalizeDelay(Number(parsed.retry_after));
+    if (d) return d;
   } catch {
     // ER:LC occasionally returns a plain-text error.
   }
-  return 60_000;
+  return 5_000;
 }
 
 function waitMessage(until: string): string {
-  const minutes = Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 60_000));
-  return `تحديث ER:LC متوقف مؤقتًا، بيرجع تلقائيًا خلال ${minutes} دقيقة`;
+  const seconds = Math.max(1, Math.ceil((Date.parse(until) - Date.now()) / 1000));
+  return `ER:LC طلب انتظار قصير — يرجع التحديث خلال ${seconds} ثانية`;
 }
 
 /** Pulls live positions from the ER:LC server API (throttled, shared by all users). */
@@ -115,10 +127,16 @@ async function refreshFromErlc(): Promise<string | null> {
     }
     await supabaseAdmin
       .from("player_positions")
-      .update({ updated_at: new Date(Date.now() + 60_000).toISOString(), team: "error" })
+      .update({ updated_at: new Date(Date.now() + 5_000).toISOString(), team: "error" })
       .eq("roblox_username_lower", SYNC_ROW);
     return `تعذّر تحديث ER:LC (${res.status}) — بنحاول تلقائيًا`;
   }
+  // Pace proactively when the bucket is nearly empty instead of hitting 429.
+  const remaining = Number(res.headers.get("x-ratelimit-remaining"));
+  const pauseUntil =
+    Number.isFinite(remaining) && remaining <= 1
+      ? normalizeDelay(Number(res.headers.get("x-ratelimit-reset")))
+      : null;
   const json = (await res.json()) as { Players?: ErlcPlayer[] };
   const now = new Date().toISOString();
 
@@ -157,7 +175,10 @@ async function refreshFromErlc(): Promise<string | null> {
     .lt("updated_at", now);
   await supabaseAdmin
     .from("player_positions")
-    .update({ updated_at: now, team: "ok" })
+    .update({
+      updated_at: pauseUntil ? new Date(Date.now() + pauseUntil - MIN_POLL_MS).toISOString() : now,
+      team: "ok",
+    })
     .eq("roblox_username_lower", SYNC_ROW);
   return null;
 }
