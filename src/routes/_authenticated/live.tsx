@@ -33,7 +33,8 @@ function LivePage() {
   const { data } = useQuery({
     queryKey: ["live-players"],
     queryFn: () => fetchPlayers(),
-    refetchInterval: 3000,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
     enabled: !!profile?.roblox_username,
   });
   const voice = useProximityVoice(profile?.roblox_username ? user.id : null);
