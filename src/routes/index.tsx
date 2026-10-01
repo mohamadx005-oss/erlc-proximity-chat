@@ -9,9 +9,15 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "صوت المقاطعة — محادثة صوتية بالقرب في ERLC" },
-      { name: "description", content: "سجّل بديسكورد، اربط روبلكس، واسمع اللاعبين القريبين منك منك في ERLC." },
+      {
+        name: "description",
+        content: "سجّل بديسكورد، اربط روبلكس، واسمع اللاعبين القريبين منك منك في ERLC.",
+      },
       { property: "og:title", content: "صوت المقاطعة — محادثة صوتية بالقرب في ERLC" },
-      { property: "og:description", content: "كل ما قربت من لاعب تسمعه أوضح، وكل ما بعدت يخفت صوته." },
+      {
+        property: "og:description",
+        content: "كل ما قربت من لاعب تسمعه أوضح، وكل ما بعدت يخفت صوته.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -44,9 +50,12 @@ function Index() {
           اسمع اللي <span className="text-primary">جنبك</span> بس
         </h1>
         <p className="mt-5 max-w-xl text-lg text-muted-foreground">
-          محادثة صوتية تعتمد على مكانك داخل اللعبة. قرّبت من لاعب؟ صوته يوضح. بعدت؟ يخفت شوي شوي لين يختفي.
+          محادثة صوتية تعتمد على مكانك داخل اللعبة. قرّبت من لاعب؟ صوته يوضح. بعدت؟ يخفت شوي شوي لين
+          يختفي.
         </p>
-        {err && <p className="mt-6 rounded-lg bg-destructive/10 px-4 py-2 text-destructive">{err}</p>}
+        {err && (
+          <p className="mt-6 rounded-lg bg-destructive/10 px-4 py-2 text-destructive">{err}</p>
+        )}
         <div className="mt-8">
           {signedIn ? (
             <Button asChild size="lg" className="shadow-[var(--shadow-glow)]">
@@ -66,7 +75,10 @@ function Index() {
           { icon: MapPin, t: "اربط روبلكس", d: "عشان نعرف مين أنت داخل السيرفر." },
           { icon: Headphones, t: "تكلّم", d: "الصوت يتغير حسب المسافة بينكم." },
         ].map(({ icon: Icon, t, d }) => (
-          <div key={t} className="rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-[var(--shadow-panel)]">
+          <div
+            key={t}
+            className="rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-[var(--shadow-panel)]"
+          >
             <Icon className="h-6 w-6 text-primary" />
             <h3 className="mt-3 text-lg font-bold">{t}</h3>
             <p className="mt-1 text-muted-foreground">{d}</p>

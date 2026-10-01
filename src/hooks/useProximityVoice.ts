@@ -109,10 +109,7 @@ export function useProximityVoice(userId: string | null) {
             .filter(([, p]) => p.connection.connectionState === "connected")
             .map(([id]) => id),
         );
-        if (
-          connection.connectionState === "failed" ||
-          connection.connectionState === "closed"
-        ) {
+        if (connection.connectionState === "failed" || connection.connectionState === "closed") {
           peersRef.current.delete(peerId);
         }
       };

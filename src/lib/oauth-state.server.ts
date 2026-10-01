@@ -40,12 +40,7 @@ export async function verifyState(state: string | null): Promise<Record<string, 
   if (!state) return null;
   const [body, sig] = state.split(".");
   if (!body || !sig) return null;
-  const ok = await crypto.subtle.verify(
-    "HMAC",
-    await key(),
-    fromB64url(sig),
-    encoder.encode(body),
-  );
+  const ok = await crypto.subtle.verify("HMAC", await key(), fromB64url(sig), encoder.encode(body));
   if (!ok) return null;
   try {
     const parsed = JSON.parse(new TextDecoder().decode(fromB64url(body))) as Record<string, string>;

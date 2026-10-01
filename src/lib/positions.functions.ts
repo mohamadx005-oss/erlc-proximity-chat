@@ -21,8 +21,8 @@ type ErlcPlayer = {
   Location?: { LocationX?: number; LocationZ?: number };
 };
 
-const MIN_POLL_MS = 2000;
-const CLAIM_MS = 6_000;
+const MIN_POLL_MS = 3500;
+const CLAIM_MS = 8_000;
 const SYNC_ROW = "__erlc_sync__";
 
 type SyncState = {
@@ -31,26 +31,56 @@ type SyncState = {
   updated_at: string;
 };
 
+/** In-memory synchronization lock & timestamp to debounce rapid calls from multiple visitors on this instance. */
+let memoryLastSyncTime = 0;
+let memoryActiveSyncPromise: Promise<string | null> | null = null;
+
 /** Converts a seconds / epoch value into a delay. Never shortened: ER:LC blocks apps that retry early. */
 function toDelayMs(raw: number): number | null {
   if (!Number.isFinite(raw) || raw <= 0) return null;
   let ms: number;
-  if (raw > 1e12) ms = raw - Date.now(); // epoch ms
-  else if (raw > 1e9) ms = raw * 1000 - Date.now(); // epoch seconds
+  if (raw > 1e12)
+    ms = raw - Date.now(); // epoch ms
+  else if (raw > 1e9)
+    ms = raw * 1000 - Date.now(); // epoch seconds
   else ms = raw * 1000; // seconds
   return Math.max(1000, Math.ceil(ms) + 1000);
 }
 
+function parseDelay(headerVal: string | null | undefined): number | null {
+  if (!headerVal) return null;
+  const num = Number(headerVal);
+  if (Number.isFinite(num) && num > 0) {
+    return toDelayMs(num);
+  }
+  const parsedDate = Date.parse(headerVal);
+  if (!Number.isNaN(parsedDate) && parsedDate > Date.now()) {
+    return parsedDate - Date.now() + 1000;
+  }
+  return null;
+}
+
 function retryDelayMs(response: Response, body: string): number {
-  const candidates: (number | null)[] = [toDelayMs(Number(response.headers.get("retry-after")))];
+  const candidates: (number | null)[] = [
+    parseDelay(response.headers.get("retry-after")),
+    parseDelay(response.headers.get("x-ratelimit-reset-after")),
+    parseDelay(response.headers.get("x-ratelimit-reset")),
+  ];
   try {
-    const parsed = JSON.parse(body) as { retry_after?: number };
-    candidates.push(toDelayMs(Number(parsed.retry_after)));
+    const parsed = JSON.parse(body) as {
+      retry_after?: number | string;
+      retryAfter?: number | string;
+      reset_after?: number | string;
+      resetAfter?: number | string;
+    };
+    if (parsed.retry_after !== undefined) candidates.push(parseDelay(String(parsed.retry_after)));
+    if (parsed.retryAfter !== undefined) candidates.push(parseDelay(String(parsed.retryAfter)));
+    if (parsed.reset_after !== undefined) candidates.push(parseDelay(String(parsed.reset_after)));
+    if (parsed.resetAfter !== undefined) candidates.push(parseDelay(String(parsed.resetAfter)));
   } catch {
     // ER:LC occasionally returns a plain-text error.
   }
-  candidates.push(toDelayMs(Number(response.headers.get("x-ratelimit-reset"))));
-  const valid = candidates.filter((n): n is number => n !== null);
+  const valid = candidates.filter((n): n is number => n !== null && n > 0);
   return valid.length ? Math.max(...valid) : 60_000;
 }
 
@@ -60,8 +90,8 @@ function waitMessage(until: string): string {
   return `ER:LC موقف التتبع مؤقتًا — يرجع تلقائيًا خلال ${Math.ceil(seconds / 60)} دقيقة`;
 }
 
-/** Pulls live positions from the ER:LC server API (throttled, shared by all users). */
-async function refreshFromErlc(): Promise<string | null> {
+/** Executes the actual atomic sync with ER:LC via database coordination. */
+async function executeErlcSync(): Promise<string | null> {
   const apiKey = process.env["ERLC_API_KEY"];
   if (!apiKey) return "ERLC_API_KEY غير مضبوط";
   const globalKey = process.env["ERLC_GLOBAL_API_KEY"];
@@ -112,31 +142,57 @@ async function refreshFromErlc(): Promise<string | null> {
 
   const headers: Record<string, string> = { "server-key": apiKey, accept: "application/json" };
   if (globalKey) headers["authorization"] = globalKey;
-  const res = await fetch("https://api.erlc.gg/v2/server?Players=true", { headers });
+
+  let res: Response;
+  try {
+    res = await fetch("https://api.erlc.gg/v2/server?Players=true", { headers });
+  } catch (netErr) {
+    console.error("ERLC Network fetch failed", netErr);
+    await supabaseAdmin
+      .from("player_positions")
+      .update({ updated_at: new Date(Date.now() + 10_000).toISOString(), team: "error" })
+      .eq("roblox_username_lower", SYNC_ROW);
+    return "تعذّر الاتصال بسيرفر ERLC — بنحاول تلقائيًا";
+  }
+
   if (!res.ok) {
     const text = await res.text();
     console.error("ERLC API failed", res.status, text);
-    if (res.status === 429) {
-      const blockedUntil = new Date(Date.now() + retryDelayMs(res, text)).toISOString();
+
+    const isRateLimit =
+      res.status === 429 ||
+      res.status === 4001 ||
+      text.includes("4001") ||
+      text.toLowerCase().includes("rate limit") ||
+      text.toLowerCase().includes("ratelimit") ||
+      text.toLowerCase().includes("too many requests");
+
+    if (isRateLimit) {
+      const delayMs = retryDelayMs(res, text);
+      const blockedUntil = new Date(Date.now() + delayMs).toISOString();
       await supabaseAdmin
         .from("player_positions")
         .update({ updated_at: blockedUntil, team: "rate-limited" })
         .eq("roblox_username_lower", SYNC_ROW);
       return waitMessage(blockedUntil);
     }
+
+    // For any server error or unexpected HTTP status, back off 15 seconds
     await supabaseAdmin
       .from("player_positions")
-      .update({ updated_at: new Date(Date.now() + 5_000).toISOString(), team: "error" })
+      .update({ updated_at: new Date(Date.now() + 15_000).toISOString(), team: "error" })
       .eq("roblox_username_lower", SYNC_ROW);
     return `تعذّر تحديث ER:LC (${res.status}) — بنحاول تلقائيًا`;
   }
+
   // Pace proactively when the bucket is nearly empty instead of hitting 429.
   const remainingHeader = res.headers.get("x-ratelimit-remaining");
   const remaining = remainingHeader === null ? NaN : Number(remainingHeader);
-  const pauseUntil =
-    Number.isFinite(remaining) && remaining <= 2
-      ? toDelayMs(Number(res.headers.get("x-ratelimit-reset")))
-      : null;
+  let pauseUntil: number | null = null;
+  if (Number.isFinite(remaining) && remaining <= 5) {
+    pauseUntil = parseDelay(res.headers.get("x-ratelimit-reset")) ?? 6_000;
+  }
+
   const json = (await res.json()) as { Players?: ErlcPlayer[] };
   const now = new Date().toISOString();
 
@@ -183,6 +239,22 @@ async function refreshFromErlc(): Promise<string | null> {
   return null;
 }
 
+/** Pulls live positions from the ER:LC server API (throttled, shared by all users). */
+async function refreshFromErlc(): Promise<string | null> {
+  const now = Date.now();
+  if (now - memoryLastSyncTime < MIN_POLL_MS) {
+    return null;
+  }
+  if (memoryActiveSyncPromise) {
+    return memoryActiveSyncPromise;
+  }
+  memoryActiveSyncPromise = executeErlcSync().finally(() => {
+    memoryLastSyncTime = Date.now();
+    memoryActiveSyncPromise = null;
+  });
+  return memoryActiveSyncPromise;
+}
+
 export const getLivePlayers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async (): Promise<{ players: LivePlayer[]; error: string | null }> => {
@@ -195,8 +267,8 @@ export const getLivePlayers = createServerFn({ method: "GET" })
     }
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // Only real, recent positions count — stale rows must never look "connected".
-    const freshSince = new Date(Date.now() - 30_000).toISOString();
+    // Only real, recent positions count — 90s grace window avoids player drops during temporary rate-limit pauses.
+    const freshSince = new Date(Date.now() - 90_000).toISOString();
     const { data: positions } = await supabaseAdmin
       .from("player_positions")
       .select("roblox_username, roblox_username_lower, roblox_id, x, z, team, updated_at")

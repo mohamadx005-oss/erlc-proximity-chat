@@ -81,8 +81,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "صوت المقاطعة — ERLC Proximity Voice" },
       { name: "description", content: "محادثة صوتية حسب قربك من اللاعبين في خريطة ERLC الصيفية." },
-            { property: "og:title", content: "صوت المقاطعة — ERLC Proximity Voice" },
-      { property: "og:description", content: "محادثة صوتية حسب قربك من اللاعبين في خريطة ERLC الصيفية." },
+      { property: "og:title", content: "صوت المقاطعة — ERLC Proximity Voice" },
+      {
+        property: "og:description",
+        content: "محادثة صوتية حسب قربك من اللاعبين في خريطة ERLC الصيفية.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
