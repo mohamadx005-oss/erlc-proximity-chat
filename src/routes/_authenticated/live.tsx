@@ -33,15 +33,20 @@ function LivePage() {
     queryKey: ["profile"],
     queryFn: () => fetchProfile(),
   });
-  const { data } = useQuery({
-    queryKey: ["live-players"],
-    queryFn: () => fetchPlayers(),
-    refetchInterval: 3500,
-    refetchIntervalInBackground: false,
-    enabled: !!profile?.roblox_username,
-  });
   const voice = useProximityVoice(profile?.roblox_username ? user.id : null);
   const [volumes, setVolumes] = useState<PeerVolume[]>([]);
+
+  const hasConnectedPeers = voice.connectedPeers.length > 0;
+  // Adaptive polling: 6.5s when active in voice with others, 25s when solo to protect ER:LC quota
+  const pollInterval = hasConnectedPeers ? 6500 : 25000;
+
+  const { data } = useQuery({
+    queryKey: ["live-players", hasConnectedPeers],
+    queryFn: () => fetchPlayers({ data: { activePeersCount: voice.connectedPeers.length } }),
+    refetchInterval: pollInterval,
+    refetchIntervalInBackground: true,
+    enabled: !!profile?.roblox_username,
+  });
 
   const players = data?.players ?? [];
   const meName = profile?.roblox_username?.toLowerCase();

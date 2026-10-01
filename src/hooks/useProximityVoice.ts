@@ -134,8 +134,9 @@ export function useProximityVoice(userId: string | null) {
         const volume = me && other ? volumeForDistance(distance(me, other)) : 0;
         const pan = me && other ? panForPositions(me, other) : 0;
         const now = audioCtxRef.current?.currentTime ?? 0;
-        peer.gain.gain.setTargetAtTime(volume, now, 0.25);
-        peer.panner.pan.setTargetAtTime(pan, now, 0.25);
+        // Smooth 0.8s exponential ramping ensures zero audio pops/clicks across update intervals
+        peer.gain.gain.setTargetAtTime(volume, now, 0.8);
+        peer.panner.pan.setTargetAtTime(pan, now, 0.8);
         result.push({ userId: peerId, volume });
       }
       return result;

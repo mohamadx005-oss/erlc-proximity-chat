@@ -21,7 +21,8 @@ type ErlcPlayer = {
   Location?: { LocationX?: number; LocationZ?: number };
 };
 
-const MIN_POLL_MS = 3500;
+const ACTIVE_POLL_MS = 6500;
+const SOLO_POLL_MS = 25000;
 const CLAIM_MS = 8_000;
 const SYNC_ROW = "__erlc_sync__";
 
@@ -91,7 +92,7 @@ function waitMessage(until: string): string {
 }
 
 /** Executes the actual atomic sync with ER:LC via database coordination. */
-async function executeErlcSync(): Promise<string | null> {
+async function executeErlcSync(minInterval: number): Promise<string | null> {
   const apiKey = process.env["ERLC_API_KEY"];
   if (!apiKey) return "ERLC_API_KEY غير مضبوط";
   const globalKey = process.env["ERLC_GLOBAL_API_KEY"];
@@ -110,7 +111,7 @@ async function executeErlcSync(): Promise<string | null> {
     if (nextAttempt > Date.now()) {
       return currentSync.team === "rate-limited" ? waitMessage(currentSync.updated_at) : null;
     }
-    if (Date.now() - nextAttempt < MIN_POLL_MS) return null;
+    if (Date.now() - nextAttempt < minInterval) return null;
   }
 
   // Every visitor polls this function. An atomic conditional update elects
@@ -240,15 +241,16 @@ async function executeErlcSync(): Promise<string | null> {
 }
 
 /** Pulls live positions from the ER:LC server API (throttled, shared by all users). */
-async function refreshFromErlc(): Promise<string | null> {
+async function refreshFromErlc(hasPeers: boolean): Promise<string | null> {
+  const minInterval = hasPeers ? ACTIVE_POLL_MS : SOLO_POLL_MS;
   const now = Date.now();
-  if (now - memoryLastSyncTime < MIN_POLL_MS) {
+  if (now - memoryLastSyncTime < minInterval) {
     return null;
   }
   if (memoryActiveSyncPromise) {
     return memoryActiveSyncPromise;
   }
-  memoryActiveSyncPromise = executeErlcSync().finally(() => {
+  memoryActiveSyncPromise = executeErlcSync(minInterval).finally(() => {
     memoryLastSyncTime = Date.now();
     memoryActiveSyncPromise = null;
   });
@@ -257,10 +259,12 @@ async function refreshFromErlc(): Promise<string | null> {
 
 export const getLivePlayers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async (): Promise<{ players: LivePlayer[]; error: string | null }> => {
+  .validator((input?: { activePeersCount?: number }) => input)
+  .handler(async ({ data }): Promise<{ players: LivePlayer[]; error: string | null }> => {
     let error: string | null = null;
+    const hasPeers = (data?.activePeersCount ?? 0) > 0;
     try {
-      error = await refreshFromErlc();
+      error = await refreshFromErlc(hasPeers);
     } catch (e) {
       console.error(e);
       error = "تعذّر الاتصال بسيرفر ERLC";
