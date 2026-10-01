@@ -37,8 +37,8 @@ function LivePage() {
   const [volumes, setVolumes] = useState<PeerVolume[]>([]);
 
   const hasConnectedPeers = voice.connectedPeers.length > 0;
-  // Adaptive polling: 6.5s when active in voice with others, 25s when solo to protect ER:LC quota
-  const pollInterval = hasConnectedPeers ? 6500 : 25000;
+  // Adaptive polling: 8s when active in voice with others, 30s when solo to protect ER:LC quota
+  const pollInterval = hasConnectedPeers ? 8000 : 30000;
 
   const { data } = useQuery({
     queryKey: ["live-players", hasConnectedPeers],

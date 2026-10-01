@@ -21,9 +21,10 @@ type ErlcPlayer = {
   Location?: { LocationX?: number; LocationZ?: number };
 };
 
-const ACTIVE_POLL_MS = 6500;
-const SOLO_POLL_MS = 25000;
-const CLAIM_MS = 8_000;
+const ACTIVE_POLL_MS = 8000;
+const SOLO_POLL_MS = 30000;
+const CLAIM_MS = 10_000;
+const SAFETY_BUFFER_MS = 20_000;
 const SYNC_ROW = "__erlc_sync__";
 
 type SyncState = {
@@ -45,7 +46,8 @@ function toDelayMs(raw: number): number | null {
   else if (raw > 1e9)
     ms = raw * 1000 - Date.now(); // epoch seconds
   else ms = raw * 1000; // seconds
-  return Math.max(1000, Math.ceil(ms) + 1000);
+  // Add 20s safety buffer so clock differences never cause an early retry on ER:LC servers
+  return Math.max(SAFETY_BUFFER_MS, Math.ceil(ms) + SAFETY_BUFFER_MS);
 }
 
 function parseDelay(headerVal: string | null | undefined): number | null {
@@ -56,7 +58,7 @@ function parseDelay(headerVal: string | null | undefined): number | null {
   }
   const parsedDate = Date.parse(headerVal);
   if (!Number.isNaN(parsedDate) && parsedDate > Date.now()) {
-    return parsedDate - Date.now() + 1000;
+    return parsedDate - Date.now() + SAFETY_BUFFER_MS;
   }
   return null;
 }
@@ -82,7 +84,7 @@ function retryDelayMs(response: Response, body: string): number {
     // ER:LC occasionally returns a plain-text error.
   }
   const valid = candidates.filter((n): n is number => n !== null && n > 0);
-  return valid.length ? Math.max(...valid) : 60_000;
+  return valid.length ? Math.max(...valid) : 60_000 + SAFETY_BUFFER_MS;
 }
 
 function waitMessage(until: string): string {
@@ -99,6 +101,8 @@ async function executeErlcSync(minInterval: number): Promise<string | null> {
 
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
+  const keyFingerprint = apiKey ? `key:${apiKey.slice(-6)}` : "no-key";
+
   const { data: sync } = await supabaseAdmin
     .from("player_positions")
     .select("roblox_username, team, updated_at")
@@ -107,11 +111,16 @@ async function executeErlcSync(minInterval: number): Promise<string | null> {
 
   const currentSync = sync as SyncState | null;
   if (currentSync) {
-    const nextAttempt = Date.parse(currentSync.updated_at);
-    if (nextAttempt > Date.now()) {
-      return currentSync.team === "rate-limited" ? waitMessage(currentSync.updated_at) : null;
+    // If key changed/regenerated in Roblox, bypass any stale rate-limit from the old key!
+    const keyChanged =
+      currentSync.roblox_username !== keyFingerprint && currentSync.roblox_username !== SYNC_ROW;
+    if (!keyChanged) {
+      const nextAttempt = Date.parse(currentSync.updated_at);
+      if (nextAttempt > Date.now()) {
+        return currentSync.team === "rate-limited" ? waitMessage(currentSync.updated_at) : null;
+      }
+      if (Date.now() - nextAttempt < minInterval) return null;
     }
-    if (Date.now() - nextAttempt < minInterval) return null;
   }
 
   // Every visitor polls this function. An atomic conditional update elects
@@ -121,7 +130,7 @@ async function executeErlcSync(minInterval: number): Promise<string | null> {
   if (currentSync) {
     const { data: won } = await supabaseAdmin
       .from("player_positions")
-      .update({ team: claim, updated_at: claimedUntil })
+      .update({ team: claim, roblox_username: keyFingerprint, updated_at: claimedUntil })
       .eq("roblox_username_lower", SYNC_ROW)
       .eq("updated_at", currentSync.updated_at)
       .select("team");
@@ -129,7 +138,7 @@ async function executeErlcSync(minInterval: number): Promise<string | null> {
   } else {
     const { error: insertError } = await supabaseAdmin.from("player_positions").insert({
       roblox_username_lower: SYNC_ROW,
-      roblox_username: SYNC_ROW,
+      roblox_username: keyFingerprint,
       roblox_id: null,
       x: 0,
       y: 0,
@@ -173,7 +182,7 @@ async function executeErlcSync(minInterval: number): Promise<string | null> {
       const blockedUntil = new Date(Date.now() + delayMs).toISOString();
       await supabaseAdmin
         .from("player_positions")
-        .update({ updated_at: blockedUntil, team: "rate-limited" })
+        .update({ updated_at: blockedUntil, team: "rate-limited", roblox_username: keyFingerprint })
         .eq("roblox_username_lower", SYNC_ROW);
       return waitMessage(blockedUntil);
     }
@@ -235,6 +244,7 @@ async function executeErlcSync(minInterval: number): Promise<string | null> {
     .update({
       updated_at: pauseUntil ? new Date(Date.now() + pauseUntil).toISOString() : now,
       team: "ok",
+      roblox_username: keyFingerprint,
     })
     .eq("roblox_username_lower", SYNC_ROW);
   return null;
@@ -301,4 +311,13 @@ export const getLivePlayers = createServerFn({ method: "GET" })
       };
     });
     return { players, error };
+  });
+
+export const resetErlcCooldown = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await supabaseAdmin.from("player_positions").delete().eq("roblox_username_lower", SYNC_ROW);
+    memoryLastSyncTime = 0;
+    return { ok: true };
   });
