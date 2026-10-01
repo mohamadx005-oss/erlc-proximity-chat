@@ -131,10 +131,11 @@ async function refreshFromErlc(): Promise<string | null> {
     return `تعذّر تحديث ER:LC (${res.status}) — بنحاول تلقائيًا`;
   }
   // Pace proactively when the bucket is nearly empty instead of hitting 429.
-  const remaining = Number(res.headers.get("x-ratelimit-remaining"));
+  const remainingHeader = res.headers.get("x-ratelimit-remaining");
+  const remaining = remainingHeader === null ? NaN : Number(remainingHeader);
   const pauseUntil =
-    Number.isFinite(remaining) && remaining <= 1
-      ? normalizeDelay(Number(res.headers.get("x-ratelimit-reset")))
+    Number.isFinite(remaining) && remaining <= 2
+      ? toDelayMs(Number(res.headers.get("x-ratelimit-reset")))
       : null;
   const json = (await res.json()) as { Players?: ErlcPlayer[] };
   const now = new Date().toISOString();
@@ -175,7 +176,7 @@ async function refreshFromErlc(): Promise<string | null> {
   await supabaseAdmin
     .from("player_positions")
     .update({
-      updated_at: pauseUntil ? new Date(Date.now() + pauseUntil - MIN_POLL_MS).toISOString() : now,
+      updated_at: pauseUntil ? new Date(Date.now() + pauseUntil).toISOString() : now,
       team: "ok",
     })
     .eq("roblox_username_lower", SYNC_ROW);
